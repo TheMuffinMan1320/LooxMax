@@ -1,6 +1,8 @@
 import { useAuth } from '@/context/auth';
 import { FEATURES } from '@/constants/features';
+import { useProfile } from '@/context/ProfileContext';
 import { supabase } from '@/lib/supabase';
+import { bmiToScore } from '@/utils/scoring';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -22,6 +24,7 @@ const MONTH_NAMES = [
 ];
 
 type AnalysisResult = Record<string, number>;
+type ReasoningResult = Record<string, string>;
 
 type ScanRecord = {
   id: string;
@@ -38,21 +41,22 @@ function imageMediaType(uri: string): string {
   return 'image/jpeg';
 }
 
-async function analyzeWithClaude(imageBase64: string, imageUri: string): Promise<AnalysisResult> {
+async function analyzeWithClaude(
+  imageBase64: string,
+  imageUri: string,
+): Promise<{ scores: AnalysisResult; reasoning: ReasoningResult }> {
   const mediaType = imageMediaType(imageUri);
 
-  const { data: { session } } = await supabase.auth.getSession();
   const { data, error } = await supabase.functions.invoke('analyze-face', {
     body: { imageBase64, mediaType },
-    headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
   });
 
   if (error) throw new Error(error.message);
 
-  const scores = data?.scores as Record<string, number> | undefined;
+  const scores = data?.scores as AnalysisResult | undefined;
   if (!scores) throw new Error('No scores returned from analysis.');
 
-  return scores;
+  return { scores, reasoning: (data?.reasoning as ReasoningResult) ?? {} };
 }
 
 function scoreColor(score: number): string {
@@ -80,6 +84,7 @@ function buildCalendarCells(year: number, month: number) {
 
 export default function ScanScreen() {
   const { user } = useAuth();
+  const { profile } = useProfile();
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -110,13 +115,24 @@ export default function ScanScreen() {
     }
   };
 
-  const saveScan = async (scores: AnalysisResult) => {
+  const saveScan = async (scores: AnalysisResult, reasoning: ReasoningResult) => {
     if (!user) return;
-    const overall =
-      Object.values(scores).reduce((a, b) => a + b, 0) / Object.values(scores).length;
+    const faceValues = Object.values(scores);
+    const faceSum = faceValues.reduce((a, b) => a + b, 0);
+
+    const bmi =
+      profile?.heightCm && profile?.weightKg
+        ? profile.weightKg / Math.pow(profile.heightCm / 100, 2)
+        : null;
+    const bodyComp = bmi ? bmiToScore(bmi) : null;
+
+    const totalSum = bodyComp !== null ? faceSum + bodyComp : faceSum;
+    const totalCount = bodyComp !== null ? faceValues.length + 1 : faceValues.length;
+    const overall = totalSum / totalCount;
     await supabase.from('scans').insert({
       user_id: user.id,
       scores,
+      reasoning,
       overall_score: parseFloat(overall.toFixed(2)),
     });
     await loadScans();
@@ -163,9 +179,9 @@ export default function ScanScreen() {
     if (!imageUri || !imageBase64) return;
     setAnalyzing(true);
     try {
-      const scores = await analyzeWithClaude(imageBase64, imageUri);
+      const { scores, reasoning } = await analyzeWithClaude(imageBase64, imageUri);
       setResults(scores);
-      await saveScan(scores);
+      await saveScan(scores, reasoning);
     } finally {
       setAnalyzing(false);
     }

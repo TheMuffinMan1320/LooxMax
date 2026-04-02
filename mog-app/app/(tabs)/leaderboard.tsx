@@ -3,7 +3,7 @@ import { useProfile } from '@/context/ProfileContext';
 import { supabase } from '@/lib/supabase';
 import { LeaderboardGroup, LeaderboardUser } from '@/types';
 import { haversineDistance } from '@/utils/distance';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -55,9 +55,10 @@ function initials(name: string): string {
 
 interface LeaderboardListProps {
   data: LeaderboardUser[];
+  currentUserId?: string;
 }
 
-function LeaderboardList({ data }: LeaderboardListProps) {
+function LeaderboardList({ data, currentUserId }: LeaderboardListProps) {
   if (data.length === 0) return null;
   const top3 = data.slice(0, 3);
   const rest = data.slice(3);
@@ -82,18 +83,24 @@ function LeaderboardList({ data }: LeaderboardListProps) {
       </View>
 
       <Text style={styles.sectionTitle}>Rankings</Text>
-      {data.map(user => (
-        <View key={user.id} style={styles.row}>
-          <View style={[styles.rankBadge, { backgroundColor: rankBadgeColor(user.rank) }]}>
-            <Text style={[styles.rankText, { color: rankTextColor(user.rank) }]}>{user.rank}</Text>
+      {data.map(u => {
+        const isMe = u.id === currentUserId;
+        return (
+          <View key={u.id} style={[styles.row, isMe && styles.rowHighlight]}>
+            <View style={[styles.rankBadge, { backgroundColor: rankBadgeColor(u.rank) }]}>
+              <Text style={[styles.rankText, { color: rankTextColor(u.rank) }]}>{u.rank}</Text>
+            </View>
+            <View style={[styles.avatar, isMe && styles.avatarHighlight]}>
+              <Text style={styles.avatarInitials}>{u.avatarInitials}</Text>
+            </View>
+            <Text style={[styles.name, isMe && styles.nameHighlight]}>{u.name}</Text>
+            {isMe && <Text style={styles.youBadge}>You</Text>}
+            <Text style={[styles.score, isMe && { color: '#facc15' }]}>
+              {u.overallScore > 0 ? u.overallScore.toFixed(1) : '—'}
+            </Text>
           </View>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarInitials}>{user.avatarInitials}</Text>
-          </View>
-          <Text style={styles.name}>{user.name}</Text>
-          <Text style={styles.score}>{user.overallScore.toFixed(1)}</Text>
-        </View>
-      ))}
+        );
+      })}
     </>
   );
 }
@@ -108,6 +115,15 @@ export default function LeaderboardScreen() {
   const [groupMembers, setGroupMembers] = useState<LeaderboardUser[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [userEntry, setUserEntry] = useState<LeaderboardUser | null>(null);
+
+  const mergedNational = useMemo(() => {
+    if (!userEntry) return NATIONAL_LEADERBOARD;
+    const without = NATIONAL_LEADERBOARD.filter(u => u.id !== userEntry.id);
+    return [...without, userEntry]
+      .sort((a, b) => b.overallScore - a.overallScore)
+      .map((u, i) => ({ ...u, rank: i + 1 }));
+  }, [userEntry]);
 
   // Modal state
   const [modalVisible, setModalVisible] = useState(false);
@@ -120,6 +136,23 @@ export default function LeaderboardScreen() {
   useEffect(() => {
     if (!user) return;
     loadUserGroups();
+    supabase
+      .from('scans')
+      .select('overall_score')
+      .eq('user_id', user.id)
+      .order('scanned_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        const name = user.user_metadata?.full_name ?? 'You';
+        setUserEntry({
+          id: user.id,
+          name,
+          avatarInitials: initials(name),
+          overallScore: data?.overall_score ?? 0,
+          rank: 0,
+        });
+      });
   }, [user?.id]);
 
   useEffect(() => {
@@ -158,30 +191,39 @@ export default function LeaderboardScreen() {
   const loadGroupMembers = async (groupId: string) => {
     setLoadingMembers(true);
     try {
-      const { data } = await supabase
-        .from('group_members')
-        .select('user_id, joined_at')
-        .eq('group_id', groupId);
+      const [{ data: membersData }, { data: scoreData }] = await Promise.all([
+        supabase.from('group_members').select('user_id, joined_at').eq('group_id', groupId),
+        supabase
+          .from('scans')
+          .select('overall_score')
+          .eq('user_id', user!.id)
+          .order('scanned_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
-      if (!data || data.length === 0) {
+      if (!membersData || membersData.length === 0) {
         setGroupMembers([]);
         return;
       }
 
-      // Fetch display names from auth metadata via profiles
-      // For now build display list from available data (scores TBD)
-      const members: LeaderboardUser[] = data.map((row: any, i: number) => {
-        const name = row.user_id === user?.id
-          ? (user?.user_metadata?.full_name ?? 'You')
-          : `Member ${i + 1}`;
-        return {
-          id: row.user_id,
-          name,
-          avatarInitials: initials(name),
-          overallScore: 0,
-          rank: i + 1,
-        };
-      });
+      const myScore = scoreData?.overall_score ?? 0;
+
+      const members: LeaderboardUser[] = membersData
+        .map((row: any, i: number) => {
+          const isMe = row.user_id === user?.id;
+          const name = isMe ? (user?.user_metadata?.full_name ?? 'You') : `Member ${i + 1}`;
+          return {
+            id: row.user_id,
+            name,
+            avatarInitials: initials(name),
+            overallScore: isMe ? myScore : 0,
+            rank: 0,
+          };
+        })
+        .sort((a: LeaderboardUser, b: LeaderboardUser) => b.overallScore - a.overallScore)
+        .map((u: LeaderboardUser, i: number) => ({ ...u, rank: i + 1 }));
+
       setGroupMembers(members);
     } finally {
       setLoadingMembers(false);
@@ -253,7 +295,7 @@ export default function LeaderboardScreen() {
 
   const renderContent = () => {
     if (activeFilter === 'national') {
-      return <LeaderboardList data={NATIONAL_LEADERBOARD} />;
+      return <LeaderboardList data={mergedNational} currentUserId={user?.id} />;
     }
 
     if (activeFilter === 'local') {
@@ -281,7 +323,7 @@ export default function LeaderboardScreen() {
                 : `Showing local rankings near ${locationLabel} · Use GPS pin for precise filtering`}
             </Text>
           </View>
-          <LeaderboardList data={NATIONAL_LEADERBOARD} />
+          <LeaderboardList data={mergedNational} currentUserId={user?.id} />
         </>
       );
     }
@@ -356,7 +398,7 @@ export default function LeaderboardScreen() {
             </Text>
           </View>
         ) : (
-          <LeaderboardList data={groupMembers} />
+          <LeaderboardList data={groupMembers} currentUserId={user?.id} />
         )}
       </>
     );
@@ -669,6 +711,27 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
     gap: 12,
+  },
+  rowHighlight: {
+    borderWidth: 1,
+    borderColor: '#facc15',
+    backgroundColor: '#1c1c1e',
+  },
+  avatarHighlight: {
+    backgroundColor: '#3a3000',
+  },
+  nameHighlight: {
+    color: '#facc15',
+  },
+  youBadge: {
+    color: '#000',
+    backgroundColor: '#facc15',
+    fontSize: 10,
+    fontWeight: '700',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    overflow: 'hidden',
   },
   rankBadge: {
     width: 28,

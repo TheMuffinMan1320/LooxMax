@@ -1,6 +1,9 @@
 import { FEATURES } from '@/constants/features';
+import { useAuth } from '@/context/auth';
+import { supabase } from '@/lib/supabase';
 import { Module } from '@/types';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,9 +23,26 @@ function ModuleCard({ module }: { module: Module }) {
 }
 
 export default function FeatureScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, score: scoreParam } = useLocalSearchParams<{ id: string; score: string }>();
   const router = useRouter();
+  const { user } = useAuth();
   const feature = FEATURES.find(f => f.id === id);
+  const [reasoning, setReasoning] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user || !id) return;
+    supabase
+      .from('scans')
+      .select('reasoning')
+      .eq('user_id', user.id)
+      .order('scanned_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        const r = data?.reasoning as Record<string, string> | null;
+        if (r?.[id]) setReasoning(r[id]);
+      });
+  }, [user?.id, id]);
 
   if (!feature) {
     return (
@@ -32,8 +52,9 @@ export default function FeatureScreen() {
     );
   }
 
-  const color = scoreColor(feature.score);
-  const fillPercent = (feature.score / 10) * 100;
+  const score = scoreParam ? parseFloat(scoreParam) : feature.score;
+  const color = scoreColor(score);
+  const fillPercent = (score / 10) * 100;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -46,10 +67,16 @@ export default function FeatureScreen() {
         {/* Score header */}
         <View style={styles.scoreCard}>
           <Text style={styles.featureName}>{feature.name}</Text>
-          <Text style={[styles.scoreNumber, { color }]}>{feature.score.toFixed(1)}</Text>
+          <Text style={[styles.scoreNumber, { color }]}>{score.toFixed(1)}</Text>
           <View style={styles.barTrack}>
             <View style={[styles.barFill, { width: `${fillPercent}%` as any, backgroundColor: color }]} />
           </View>
+          {reasoning ? (
+            <View style={styles.reasoningBox}>
+              <Text style={styles.reasoningLabel}>Scan Analysis</Text>
+              <Text style={styles.reasoningText}>{reasoning}</Text>
+            </View>
+          ) : null}
           <Text style={styles.description}>{feature.description}</Text>
         </View>
 
@@ -110,6 +137,25 @@ const styles = StyleSheet.create({
   barFill: {
     height: '100%',
     borderRadius: 4,
+  },
+  reasoningBox: {
+    backgroundColor: '#2c2c2e',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  reasoningLabel: {
+    color: '#facc15',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+  reasoningText: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 21,
   },
   description: {
     color: '#aeaeb2',

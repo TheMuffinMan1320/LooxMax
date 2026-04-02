@@ -3,7 +3,9 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FEATURES } from '@/constants/features';
 import { useAuth } from '@/context/auth';
 import { useProfile } from '@/context/ProfileContext';
+import { supabase } from '@/lib/supabase';
 import { Feature } from '@/types';
+import { bmiToScore } from '@/utils/scoring';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -19,21 +21,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-function bmiToScore(bmi: number): number {
-  if (bmi <= 0) return 0;
-  if (bmi < 16) return 2.0;
-  if (bmi < 18.5) return 2.0 + ((bmi - 16) / 2.5) * 5.0;
-  if (bmi < 22) return 7.0 + ((bmi - 18.5) / 3.5) * 2.5;
-  if (bmi < 25) return 9.5 - ((bmi - 22) / 3) * 1.5;
-  if (bmi < 30) return 8.0 - ((bmi - 25) / 5) * 3.0;
-  return Math.max(2.0, 5.0 - (bmi - 30) * 0.3);
-}
-
-function overallScore(features: Feature[], bodyCompScore?: number): number {
-  const scores = features.map(f =>
-    f.id === 'body-composition' && bodyCompScore !== undefined ? bodyCompScore : f.score
-  );
-  return scores.reduce((acc, s) => acc + s, 0) / scores.length;
+function overallScore(features: Feature[]): number {
+  return features.reduce((acc, f) => acc + f.score, 0) / features.length;
 }
 
 function scoreLabel(score: number): string {
@@ -76,12 +65,36 @@ export default function StatsScreen() {
   const [state, setState] = useState('');
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [latestScanScores, setLatestScanScores] = useState<Record<string, number> | null>(null);
 
   const heightCm = feet || inches ? ftInToCm(feet, inches) : 0;
   const weightKg = weight ? lbsToKg(weight) : 0;
   const computedBmi = heightCm > 0 && weightKg > 0 ? weightKg / Math.pow(heightCm / 100, 2) : 0;
   const bodyCompScore = computedBmi > 0 ? bmiToScore(computedBmi) : undefined;
-  const overall = overallScore(FEATURES, bodyCompScore);
+
+  const displayFeatures = FEATURES.map(f => {
+    if (f.id === 'body-composition' && bodyCompScore !== undefined)
+      return { ...f, score: bodyCompScore };
+    if (latestScanScores?.[f.id] !== undefined)
+      return { ...f, score: latestScanScores[f.id] };
+    return f;
+  });
+  const overall = overallScore(displayFeatures);
+
+  useEffect(() => {
+    if (user) {
+      supabase
+        .from('scans')
+        .select('scores')
+        .eq('user_id', user.id)
+        .order('scanned_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.scores) setLatestScanScores(data.scores as Record<string, number>);
+        });
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     if (profile) {
@@ -97,7 +110,7 @@ export default function StatsScreen() {
   }, [profile?.id]);
 
   const handleFeaturePress = (feature: Feature) => {
-    router.push(`/feature/${feature.id}`);
+    router.push(`/feature/${feature.id}?score=${feature.score.toFixed(1)}`);
   };
 
   const handleDetectLocation = async () => {
@@ -171,17 +184,16 @@ export default function StatsScreen() {
 
         {/* Feature list */}
         <Text style={styles.sectionTitle}>Features</Text>
-        {FEATURES.map(feature => (
-          <FeatureCard
-            key={feature.id}
-            feature={
-              feature.id === 'body-composition' && bodyCompScore !== undefined
-                ? { ...feature, score: bodyCompScore }
-                : feature
-            }
-            onPress={handleFeaturePress}
-          />
-        ))}
+        {latestScanScores === null ? (
+          <View style={styles.noScanCard}>
+            <Text style={styles.noScanText}>Scan to see results</Text>
+            <Text style={styles.noScanSub}>Upload a photo on the Scan tab to rate your traits</Text>
+          </View>
+        ) : (
+          displayFeatures.map(feature => (
+            <FeatureCard key={feature.id} feature={feature} onPress={handleFeaturePress} />
+          ))
+        )}
 
         {/* Body Stats */}
         <Text style={[styles.sectionTitle, { marginTop: 28 }]}>Body Stats</Text>
@@ -342,6 +354,27 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#facc15',
     borderRadius: 4,
+  },
+  noScanCard: {
+    backgroundColor: '#1c1c1e',
+    borderRadius: 16,
+    padding: 28,
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#3a3a3c',
+  },
+  noScanText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  noScanSub: {
+    color: '#8e8e93',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   sectionTitle: {
     color: '#8e8e93',

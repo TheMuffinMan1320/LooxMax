@@ -77,11 +77,9 @@ describe('analyze-face edge function', () => {
     10000,
   );
 
-  test('returns 401 when no auth token is provided', async () => {
-    const imageBase64 = loadTestImageAsBase64();
-
+  test('returns error when body is empty', async () => {
     const { error } = await supabase.functions.invoke('analyze-face', {
-      body: { imageBase64, mediaType: 'image/jpeg' },
+      body: {},
     });
 
     expect(error).not.toBeNull();

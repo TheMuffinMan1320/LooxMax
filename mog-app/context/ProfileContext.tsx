@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 interface ProfileContextType {
   profile: UserProfile | null;
   loading: boolean;
-  updateProfile: (updates: Partial<Omit<UserProfile, 'id'>>) => Promise<void>;
+  updateProfile: (updates: Partial<Omit<UserProfile, 'id'>>) => Promise<string | null>;
 }
 
 const ProfileContext = createContext<ProfileContextType | null>(null);
@@ -34,6 +34,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
             id: data.id,
             heightCm: data.height_cm ?? null,
             weightKg: data.weight_kg ?? null,
+            bmi: data.bmi ?? null,
             city: data.city ?? null,
             state: data.state ?? null,
             latitude: data.latitude ?? null,
@@ -44,8 +45,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       });
   }, [user?.id]);
 
-  const updateProfile = async (updates: Partial<Omit<UserProfile, 'id'>>) => {
-    if (!user) return;
+  const updateProfile = async (updates: Partial<Omit<UserProfile, 'id'>>): Promise<string | null> => {
+    if (!user) return 'Not logged in';
 
     const dbRow: Record<string, unknown> = {
       id: user.id,
@@ -53,25 +54,28 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     };
     if (updates.heightCm !== undefined) dbRow.height_cm = updates.heightCm;
     if (updates.weightKg !== undefined) dbRow.weight_kg = updates.weightKg;
+    if (updates.bmi !== undefined) dbRow.bmi = updates.bmi;
     if (updates.city !== undefined) dbRow.city = updates.city;
     if (updates.state !== undefined) dbRow.state = updates.state;
     if (updates.latitude !== undefined) dbRow.latitude = updates.latitude;
     if (updates.longitude !== undefined) dbRow.longitude = updates.longitude;
 
     const { error } = await supabase.from('profiles').upsert(dbRow);
-    if (!error) {
-      setProfile(prev => ({
-        id: user.id,
-        heightCm: null,
-        weightKg: null,
-        city: null,
-        state: null,
-        latitude: null,
-        longitude: null,
-        ...prev,
-        ...updates,
-      }));
-    }
+    if (error) return error.message;
+
+    setProfile(prev => ({
+      id: user.id,
+      heightCm: null,
+      weightKg: null,
+      bmi: null,
+      city: null,
+      state: null,
+      latitude: null,
+      longitude: null,
+      ...prev,
+      ...updates,
+    }));
+    return null;
   };
 
   return (

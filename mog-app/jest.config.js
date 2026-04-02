@@ -1,0 +1,10 @@
+require('dotenv').config({ path: '.env.local' });
+
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  testMatch: ['**/tests/**/*.test.ts'],
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', { tsconfig: { module: 'commonjs' } }],
+  },
+};

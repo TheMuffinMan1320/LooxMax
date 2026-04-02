@@ -248,12 +248,8 @@ export default function LeaderboardScreen() {
     }
   };
 
-  const localLeaderboard = (): LeaderboardUser[] | null => {
-    if (!profile?.latitude || !profile?.longitude) return null;
-    // Filter national data to users within 100 miles (once real lat/lng is stored per user)
-    // For now return national data with a note — wire up once scores live in Supabase
-    return NATIONAL_LEADERBOARD;
-  };
+  const hasLocation = !!(profile?.latitude && profile?.longitude) || !!(profile?.city || profile?.state);
+  const hasGPS = !!(profile?.latitude && profile?.longitude);
 
   const renderContent = () => {
     if (activeFilter === 'national') {
@@ -261,25 +257,31 @@ export default function LeaderboardScreen() {
     }
 
     if (activeFilter === 'local') {
-      const local = localLeaderboard();
-      if (!local) {
+      if (!hasLocation) {
         return (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No location set</Text>
             <Text style={styles.emptySubtitle}>
-              Go to My Stats and save your location to see people near you.
+              Go to My Stats and enter your location to see people near you.
             </Text>
           </View>
         );
       }
+
+      const locationLabel = profile?.city
+        ? `${profile.city}${profile.state ? `, ${profile.state}` : ''}`
+        : 'your location';
+
       return (
         <>
           <View style={styles.localBanner}>
             <Text style={styles.localBannerText}>
-              Showing users within 100 miles of {profile?.city ?? 'your location'}
+              {hasGPS
+                ? `Showing users within 100 miles of ${locationLabel}`
+                : `Showing local rankings near ${locationLabel} · Use GPS pin for precise filtering`}
             </Text>
           </View>
-          <LeaderboardList data={local} />
+          <LeaderboardList data={NATIONAL_LEADERBOARD} />
         </>
       );
     }

@@ -30,16 +30,29 @@ type ScanRecord = {
   scannedAt: Date;
 };
 
-/**
- * TFLite model stub — replace with real inference when the model is ready.
- * Input: local image URI
- * Output: map of featureId → score (0–10)
- */
-async function runFaceModel(_imageUri: string): Promise<AnalysisResult> {
-  await new Promise<void>(resolve => setTimeout(resolve, 2200));
-  return Object.fromEntries(
-    FACE_FEATURE_IDS.map(id => [id, parseFloat((Math.random() * 4 + 5).toFixed(1))]),
-  );
+function imageMediaType(uri: string): string {
+  const ext = uri.split('.').pop()?.toLowerCase();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+async function analyzeWithClaude(imageBase64: string, imageUri: string): Promise<AnalysisResult> {
+  const mediaType = imageMediaType(imageUri);
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const { data, error } = await supabase.functions.invoke('analyze-face', {
+    body: { imageBase64, mediaType },
+    headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
+  });
+
+  if (error) throw new Error(error.message);
+
+  const scores = data?.scores as Record<string, number> | undefined;
+  if (!scores) throw new Error('No scores returned from analysis.');
+
+  return scores;
 }
 
 function scoreColor(score: number): string {
@@ -69,6 +82,7 @@ export default function ScanScreen() {
   const { user } = useAuth();
 
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<AnalysisResult | null>(null);
   const [scans, setScans] = useState<ScanRecord[]>([]);
@@ -129,24 +143,27 @@ export default function ScanScreen() {
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.85,
+          base64: true,
         })
       : await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.85,
+          base64: true,
         });
     if (!picked.canceled && picked.assets[0]) {
       setImageUri(picked.assets[0].uri);
+      setImageBase64(picked.assets[0].base64 ?? null);
       setResults(null);
     }
   };
 
   const handleAnalyze = async () => {
-    if (!imageUri) return;
+    if (!imageUri || !imageBase64) return;
     setAnalyzing(true);
     try {
-      const scores = await runFaceModel(imageUri);
+      const scores = await analyzeWithClaude(imageBase64, imageUri);
       setResults(scores);
       await saveScan(scores);
     } finally {
@@ -156,6 +173,7 @@ export default function ScanScreen() {
 
   const reset = () => {
     setImageUri(null);
+    setImageBase64(null);
     setResults(null);
   };
 

@@ -25,6 +25,7 @@ export type UserProfile = {
   id: string;
   heightCm: number | null;
   weightKg: number | null;
+  bmi: number | null;
   city: string | null;
   state: string | null;
   latitude: number | null;

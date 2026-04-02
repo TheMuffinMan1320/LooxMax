@@ -1,4 +1,5 @@
 import FeatureCard from '@/components/FeatureCard';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FEATURES } from '@/constants/features';
 import { useAuth } from '@/context/auth';
 import { useProfile } from '@/context/ProfileContext';
@@ -18,9 +19,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-function overallScore(features: Feature[]): number {
-  const sum = features.reduce((acc, f) => acc + f.score, 0);
-  return sum / features.length;
+function bmiToScore(bmi: number): number {
+  if (bmi <= 0) return 0;
+  if (bmi < 16) return 2.0;
+  if (bmi < 18.5) return 2.0 + ((bmi - 16) / 2.5) * 5.0;
+  if (bmi < 22) return 7.0 + ((bmi - 18.5) / 3.5) * 2.5;
+  if (bmi < 25) return 9.5 - ((bmi - 22) / 3) * 1.5;
+  if (bmi < 30) return 8.0 - ((bmi - 25) / 5) * 3.0;
+  return Math.max(2.0, 5.0 - (bmi - 30) * 0.3);
+}
+
+function overallScore(features: Feature[], bodyCompScore?: number): number {
+  const scores = features.map(f =>
+    f.id === 'body-composition' && bodyCompScore !== undefined ? bodyCompScore : f.score
+  );
+  return scores.reduce((acc, s) => acc + s, 0) / scores.length;
 }
 
 function scoreLabel(score: number): string {
@@ -55,7 +68,6 @@ export default function StatsScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { profile, updateProfile } = useProfile();
-  const overall = overallScore(FEATURES);
 
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
@@ -64,6 +76,12 @@ export default function StatsScreen() {
   const [state, setState] = useState('');
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
+
+  const heightCm = feet || inches ? ftInToCm(feet, inches) : 0;
+  const weightKg = weight ? lbsToKg(weight) : 0;
+  const computedBmi = heightCm > 0 && weightKg > 0 ? weightKg / Math.pow(heightCm / 100, 2) : 0;
+  const bodyCompScore = computedBmi > 0 ? bmiToScore(computedBmi) : undefined;
+  const overall = overallScore(FEATURES, bodyCompScore);
 
   useEffect(() => {
     if (profile) {
@@ -95,16 +113,18 @@ export default function StatsScreen() {
         latitude: coords.coords.latitude,
         longitude: coords.coords.longitude,
       });
-      if (place) {
-        setCity(place.city ?? place.subregion ?? '');
-        setState(place.region ?? '');
-      }
-      await updateProfile({
+      const detectedCity = place?.city ?? place?.subregion ?? '';
+      const detectedState = place?.region ?? '';
+      if (detectedCity) setCity(detectedCity);
+      if (detectedState) setState(detectedState);
+
+      const err = await updateProfile({
         latitude: coords.coords.latitude,
         longitude: coords.coords.longitude,
-        city: place?.city ?? place?.subregion ?? city,
-        state: place?.region ?? state,
+        city: detectedCity || city,
+        state: detectedState || state,
       });
+      if (err) Alert.alert('Could not save location', err);
     } catch {
       Alert.alert('Error', 'Could not detect location. Enter it manually.');
     } finally {
@@ -114,15 +134,17 @@ export default function StatsScreen() {
 
   const handleSave = async () => {
     setSaving(true);
-    try {
-      await updateProfile({
-        heightCm: feet || inches ? ftInToCm(feet, inches) : null,
-        weightKg: weight ? lbsToKg(weight) : null,
-        city: city.trim() || null,
-        state: state.trim() || null,
-      });
-    } finally {
-      setSaving(false);
+    const err = await updateProfile({
+      heightCm: feet || inches ? ftInToCm(feet, inches) : null,
+      weightKg: weight ? lbsToKg(weight) : null,
+      city: city.trim() || null,
+      state: state.trim() || null,
+      latitude: profile?.latitude ?? null,
+      longitude: profile?.longitude ?? null,
+    });
+    setSaving(false);
+    if (err) {
+      Alert.alert('Save failed', err);
     }
   };
 
@@ -150,7 +172,15 @@ export default function StatsScreen() {
         {/* Feature list */}
         <Text style={styles.sectionTitle}>Features</Text>
         {FEATURES.map(feature => (
-          <FeatureCard key={feature.id} feature={feature} onPress={handleFeaturePress} />
+          <FeatureCard
+            key={feature.id}
+            feature={
+              feature.id === 'body-composition' && bodyCompScore !== undefined
+                ? { ...feature, score: bodyCompScore }
+                : feature
+            }
+            onPress={handleFeaturePress}
+          />
         ))}
 
         {/* Body Stats */}
@@ -232,7 +262,7 @@ export default function StatsScreen() {
               {locating ? (
                 <ActivityIndicator size="small" color="#facc15" />
               ) : (
-                <Text style={styles.gpsIcon}>􀆪</Text>
+                <IconSymbol name="pin.fill" size={20} color="#facc15" />
               )}
             </TouchableOpacity>
           </View>
@@ -368,10 +398,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#2c2c2e',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  gpsIcon: {
-    color: '#facc15',
-    fontSize: 18,
   },
   saveButton: {
     marginTop: 20,

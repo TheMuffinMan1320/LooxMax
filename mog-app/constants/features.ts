@@ -86,16 +86,4 @@ export const FEATURES: Feature[] = [
       { id: 'body-3', title: 'Protein & Nutrition', body: 'Target 0.8–1g of protein per pound of bodyweight. Prioritize whole foods. Track calories if not at goal body fat — guessing rarely works.' },
     ],
   },
-  {
-    id: 'posture',
-    name: 'Posture',
-    score: 5.5,
-    icon: 'person.fill',
-    description: 'Posture affects how your face, neck, and frame present. Forward head posture and rounded shoulders make even attractive faces look worse.',
-    modules: [
-      { id: 'post-1', title: 'Forward Head Correction', body: 'For every inch the head is forward, it adds ~10 lbs of strain on the neck and pushes the jawline backward. Chin tucks (10 reps, 3x/day) help reverse this.' },
-      { id: 'post-2', title: 'Thoracic Mobility', body: 'Daily thoracic extension over a foam roller opens the chest and corrects kyphosis (rounded upper back). 2 minutes per day produces noticeable results in weeks.' },
-      { id: 'post-3', title: 'Strengthening Weak Muscles', body: 'Weak glutes, lower traps, and deep cervical flexors cause most postural issues. Incorporate face pulls, rows, glute bridges, and dead bugs into your routine.' },
-    ],
-  },
 ];

@@ -41,6 +41,37 @@ function imageMediaType(uri: string): string {
   return 'image/jpeg';
 }
 
+async function uploadScanPhoto(
+  userId: string,
+  base64: string,
+  uri: string,
+): Promise<void> {
+  try {
+    const contentType = imageMediaType(uri);
+    const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+    const path = `${userId}/latest.${ext}`;
+
+    const response = await fetch(`data:${contentType};base64,${base64}`);
+    const blob = await response.blob();
+
+    const { error } = await supabase.storage
+      .from('scan-photos')
+      .upload(path, blob, { contentType, upsert: true });
+
+    if (error) return;
+
+    const { data } = supabase.storage.from('scan-photos').getPublicUrl(path);
+
+    await supabase.from('user_photos').upsert({
+      user_id: userId,
+      photo_url: data.publicUrl,
+      updated_at: new Date().toISOString(),
+    });
+  } catch {
+    // Non-critical — don't block the scan result
+  }
+}
+
 async function analyzeWithClaude(
   imageBase64: string,
   imageUri: string,
@@ -181,7 +212,10 @@ export default function ScanScreen() {
     try {
       const { scores, reasoning } = await analyzeWithClaude(imageBase64, imageUri);
       setResults(scores);
-      await saveScan(scores, reasoning);
+      await Promise.all([
+        saveScan(scores, reasoning),
+        uploadScanPhoto(user!.id, imageBase64, imageUri),
+      ]);
     } finally {
       setAnalyzing(false);
     }

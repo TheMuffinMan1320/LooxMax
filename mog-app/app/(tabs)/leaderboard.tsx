@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
   ScrollView,
   StyleSheet,
@@ -56,9 +57,10 @@ function initials(name: string): string {
 interface LeaderboardListProps {
   data: LeaderboardUser[];
   currentUserId?: string;
+  onPressUser: (user: LeaderboardUser) => void;
 }
 
-function LeaderboardList({ data, currentUserId }: LeaderboardListProps) {
+function LeaderboardList({ data, currentUserId, onPressUser }: LeaderboardListProps) {
   if (data.length === 0) return null;
   const top3 = data.slice(0, 3);
   const rest = data.slice(3);
@@ -67,7 +69,7 @@ function LeaderboardList({ data, currentUserId }: LeaderboardListProps) {
     <>
       <View style={styles.podium}>
         {top3.map(user => (
-          <View key={user.id} style={[styles.podiumItem, user.rank === 1 && styles.podiumFirst]}>
+          <TouchableOpacity key={user.id} style={[styles.podiumItem, user.rank === 1 && styles.podiumFirst]} onPress={() => onPressUser(user)}>
             <View style={[styles.podiumAvatar, { borderColor: rankBadgeColor(user.rank) }]}>
               <Text style={styles.podiumInitials}>{user.avatarInitials}</Text>
             </View>
@@ -78,7 +80,7 @@ function LeaderboardList({ data, currentUserId }: LeaderboardListProps) {
             <Text style={[styles.podiumScore, { color: rankBadgeColor(user.rank) }]}>
               {user.overallScore.toFixed(1)}
             </Text>
-          </View>
+          </TouchableOpacity>
         ))}
       </View>
 
@@ -86,7 +88,7 @@ function LeaderboardList({ data, currentUserId }: LeaderboardListProps) {
       {data.map(u => {
         const isMe = u.id === currentUserId;
         return (
-          <View key={u.id} style={[styles.row, isMe && styles.rowHighlight]}>
+          <TouchableOpacity key={u.id} style={[styles.row, isMe && styles.rowHighlight]} onPress={() => onPressUser(u)}>
             <View style={[styles.rankBadge, { backgroundColor: rankBadgeColor(u.rank) }]}>
               <Text style={[styles.rankText, { color: rankTextColor(u.rank) }]}>{u.rank}</Text>
             </View>
@@ -98,7 +100,7 @@ function LeaderboardList({ data, currentUserId }: LeaderboardListProps) {
             <Text style={[styles.score, isMe && { color: '#facc15' }]}>
               {u.overallScore > 0 ? u.overallScore.toFixed(1) : '—'}
             </Text>
-          </View>
+          </TouchableOpacity>
         );
       })}
     </>
@@ -116,6 +118,25 @@ export default function LeaderboardScreen() {
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [userEntry, setUserEntry] = useState<LeaderboardUser | null>(null);
+  const [photoModalUser, setPhotoModalUser] = useState<LeaderboardUser | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [loadingPhoto, setLoadingPhoto] = useState(false);
+
+  const handlePressUser = async (pressed: LeaderboardUser) => {
+    setPhotoModalUser(pressed);
+    setPhotoUrl(null);
+    setLoadingPhoto(true);
+    try {
+      const { data } = await supabase
+        .from('user_photos')
+        .select('photo_url')
+        .eq('user_id', pressed.id)
+        .maybeSingle();
+      setPhotoUrl(data?.photo_url ?? null);
+    } finally {
+      setLoadingPhoto(false);
+    }
+  };
 
   const mergedNational = useMemo(() => {
     if (!userEntry) return NATIONAL_LEADERBOARD;
@@ -295,7 +316,7 @@ export default function LeaderboardScreen() {
 
   const renderContent = () => {
     if (activeFilter === 'national') {
-      return <LeaderboardList data={mergedNational} currentUserId={user?.id} />;
+      return <LeaderboardList data={mergedNational} currentUserId={user?.id} onPressUser={handlePressUser} />;
     }
 
     if (activeFilter === 'local') {
@@ -323,7 +344,7 @@ export default function LeaderboardScreen() {
                 : `Showing local rankings near ${locationLabel} · Use GPS pin for precise filtering`}
             </Text>
           </View>
-          <LeaderboardList data={mergedNational} currentUserId={user?.id} />
+          <LeaderboardList data={mergedNational} currentUserId={user?.id} onPressUser={handlePressUser} />
         </>
       );
     }
@@ -398,7 +419,7 @@ export default function LeaderboardScreen() {
             </Text>
           </View>
         ) : (
-          <LeaderboardList data={groupMembers} currentUserId={user?.id} />
+          <LeaderboardList data={groupMembers} currentUserId={user?.id} onPressUser={handlePressUser} />
         )}
       </>
     );
@@ -437,6 +458,44 @@ export default function LeaderboardScreen() {
 
         {renderContent()}
       </ScrollView>
+
+      {/* Photo Modal */}
+      <Modal
+        visible={!!photoModalUser}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhotoModalUser(null)}
+      >
+        <TouchableOpacity
+          style={styles.photoOverlay}
+          activeOpacity={1}
+          onPress={() => setPhotoModalUser(null)}
+        >
+          <View style={styles.photoCard}>
+            <Text style={styles.photoName}>{photoModalUser?.name}</Text>
+            <Text style={styles.photoScore}>
+              {photoModalUser && photoModalUser.overallScore > 0
+                ? photoModalUser.overallScore.toFixed(1)
+                : '—'}
+            </Text>
+            {loadingPhoto ? (
+              <View style={styles.photoPlaceholder}>
+                <ActivityIndicator color="#facc15" />
+              </View>
+            ) : photoUrl ? (
+              <Image source={{ uri: photoUrl }} style={styles.photoImage} resizeMode="cover" />
+            ) : (
+              <View style={styles.photoPlaceholder}>
+                <Text style={styles.photoInitials}>{photoModalUser?.avatarInitials}</Text>
+                <Text style={styles.photoNoPhoto}>No photo yet</Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.photoClose} onPress={() => setPhotoModalUser(null)}>
+              <Text style={styles.photoCloseText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Create / Join / Invite Code Modal */}
       <Modal
@@ -812,6 +871,67 @@ const styles = StyleSheet.create({
   inviteCodeInline: {
     color: '#facc15',
     fontWeight: '700',
+  },
+
+  // Photo modal
+  photoOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  photoCard: {
+    width: '100%',
+    backgroundColor: '#1c1c1e',
+    borderRadius: 24,
+    overflow: 'hidden',
+    alignItems: 'center',
+    paddingTop: 24,
+    paddingBottom: 8,
+  },
+  photoName: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  photoScore: {
+    color: '#facc15',
+    fontSize: 28,
+    fontWeight: '800',
+    marginBottom: 16,
+  },
+  photoImage: {
+    width: '100%',
+    aspectRatio: 1,
+  },
+  photoPlaceholder: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: '#2c2c2e',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  photoInitials: {
+    color: '#fff',
+    fontSize: 48,
+    fontWeight: '700',
+  },
+  photoNoPhoto: {
+    color: '#8e8e93',
+    fontSize: 14,
+  },
+  photoClose: {
+    paddingVertical: 16,
+    width: '100%',
+    alignItems: 'center',
+  },
+  photoCloseText: {
+    color: '#8e8e93',
+    fontSize: 16,
+    fontWeight: '600',
   },
 
   // Modal
